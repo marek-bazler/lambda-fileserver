@@ -196,14 +196,19 @@
                     statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (0%)</p>`;
 
                     let uploadResult;
-                    if (uploadInfo.upload_type === 'multipart') {
-                        uploadResult = await uploadMultipart(file, uploadInfo, (percent) => {
-                            statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%) [Multipart]</p>`;
-                        });
-                    } else {
-                        uploadResult = await uploadSimple(file, uploadInfo, (percent) => {
-                            statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%)</p>`;
-                        });
+                    try {
+                        if (uploadInfo.upload_type === 'multipart') {
+                            uploadResult = await uploadMultipart(file, uploadInfo, (percent) => {
+                                statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%) [Multipart]</p>`;
+                            });
+                        } else {
+                            uploadResult = await uploadSimple(file, uploadInfo, (percent) => {
+                                statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%)</p>`;
+                            });
+                        }
+                    } catch (uploadError) {
+                        console.error('S3 upload failed:', uploadError);
+                        throw new Error(`S3 upload failed: ${uploadError.message}`);
                     }
 
                     // Notify backend of successful upload
@@ -227,11 +232,16 @@
                     successCount++;
                 } catch (error) {
                     console.error('Upload error:', error);
+                    statusDiv.innerHTML = `<p class="error">Error uploading ${file.name}: ${error.message}</p>`;
                     errorCount++;
                 }
             }
 
-            statusDiv.innerHTML = `<p class="success">✓ ${successCount} uploaded, ${duplicateCount} duplicates skipped${errorCount > 0 ? `, ${errorCount} errors` : ''}</p>`;
+            if (errorCount > 0) {
+                statusDiv.innerHTML = `<p class="error">✗ ${successCount} uploaded, ${duplicateCount} duplicates skipped, ${errorCount} errors</p>`;
+            } else {
+                statusDiv.innerHTML = `<p class="success">✓ ${successCount} uploaded, ${duplicateCount} duplicates skipped</p>`;
+            }
             selectedFiles = [];
             document.getElementById('fileInput').value = '';
             document.getElementById('uploadBtn').disabled = true;
@@ -250,15 +260,21 @@
                 });
 
                 xhr.addEventListener('load', () => {
-                    if (xhr.status === 200) {
+                    console.log('Upload response status:', xhr.status);
+                    console.log('Upload response:', xhr.responseText);
+                    if (xhr.status === 200 || xhr.status === 204) {
                         resolve({});
                     } else {
-                        reject(new Error('Upload failed'));
+                        reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
                     }
                 });
 
-                xhr.addEventListener('error', () => reject(new Error('Network error')));
+                xhr.addEventListener('error', (e) => {
+                    console.error('XHR error:', e);
+                    reject(new Error('Network error during upload'));
+                });
 
+                console.log('Uploading to:', uploadInfo.upload_url);
                 xhr.open('PUT', uploadInfo.upload_url);
                 xhr.setRequestHeader('Content-Type', uploadInfo.content_type);
                 xhr.send(file);

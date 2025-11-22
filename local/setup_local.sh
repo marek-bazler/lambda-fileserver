@@ -15,7 +15,7 @@ echo "Setting up local AWS resources..."
 echo "Waiting for LocalStack..."
 max_attempts=30
 attempt=0
-until curl -s $ENDPOINT/_localstack/health | grep -q '"s3": "available"' || [ $attempt -eq $max_attempts ]; do
+until curl -s $ENDPOINT/_localstack/health | grep -q '"s3":' || [ $attempt -eq $max_attempts ]; do
     attempt=$((attempt + 1))
     echo "Attempt $attempt/$max_attempts..."
     sleep 2
