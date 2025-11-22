@@ -116,8 +116,8 @@ resource "aws_lambda_function" "api" {
   role            = aws_iam_role.lambda.arn
   handler         = "handler.lambda_handler"
   runtime         = "python3.11"
-  timeout         = 30
-  memory_size     = 512
+  timeout         = 10
+  memory_size     = 256
 
   environment {
     variables = {
@@ -208,7 +208,7 @@ resource "aws_apigatewayv2_integration" "lambda" {
 }
 
 resource "aws_apigatewayv2_route" "routes" {
-  for_each = toset(["/login", "/files", "/upload", "/download"])
+  for_each = toset(["/login", "/files", "/upload", "/upload-complete", "/check-duplicate", "/download"])
 
   api_id    = aws_apigatewayv2_api.api.id
   route_key = "ANY ${each.value}"

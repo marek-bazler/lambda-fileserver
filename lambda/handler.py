@@ -39,6 +39,10 @@ def lambda_handler(event, context):
             return handle_list_files(event, headers)
         elif path == '/upload' and method == 'POST':
             return handle_upload(event, headers)
+        elif path == '/upload-complete' and method == 'POST':
+            return handle_upload_complete(event, headers)
+        elif path == '/check-duplicate' and method == 'POST':
+            return handle_check_duplicate(event, headers)
         elif path == '/download' and method == 'GET':
             return handle_download(event, headers)
         else:
@@ -129,7 +133,7 @@ def handle_list_files(event, headers):
 
 
 def handle_upload(event, headers):
-    """Handle file upload with duplicate detection"""
+    """Generate presigned URLs for direct S3 upload"""
     username = verify_token(event)
     if not username:
         return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
@@ -140,71 +144,115 @@ def handle_upload(event, headers):
     if not files:
         return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'No files provided'})}
     
-    results = []
+    upload_urls = []
     
-    for file_data in files:
-        filename = file_data.get('filename')
-        content_base64 = file_data.get('content')
-        content_type = file_data.get('content_type', 'application/octet-stream')
+    for file_info in files:
+        filename = file_info.get('filename')
+        content_type = file_info.get('content_type', 'application/octet-stream')
+        file_size = file_info.get('size', 0)
         
-        if not filename or not content_base64:
-            results.append({'filename': filename, 'status': 'error', 'message': 'Missing data'})
+        if not filename:
             continue
         
-        # Decode file content
-        content = base64.b64decode(content_base64)
-        
-        # Calculate hash for deduplication
-        file_hash = hashlib.sha256(content).hexdigest()
-        
-        # Check for duplicate
-        response = files_table.query(
-            IndexName='HashIndex',
-            KeyConditionExpression='file_hash = :hash',
-            ExpressionAttributeValues={':hash': file_hash}
-        )
-        
-        if response.get('Items'):
-            existing = response['Items'][0]
-            results.append({
-                'filename': filename,
-                'status': 'duplicate',
-                'message': f'File already exists as {existing["filename"]}',
-                'file_id': existing['file_id']
-            })
-            continue
-        
-        # Upload to S3
+        # Generate unique file ID
         file_id = f"{username}/{datetime.utcnow().isoformat()}_{filename}"
-        s3.put_object(
-            Bucket=BUCKET_NAME,
-            Key=file_id,
-            Body=content,
-            ContentType=content_type
+        
+        # Generate presigned URL for upload (valid for 1 hour)
+        presigned_url = s3.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': BUCKET_NAME,
+                'Key': file_id,
+                'ContentType': content_type
+            },
+            ExpiresIn=3600
         )
         
-        # Store metadata
-        files_table.put_item(Item={
-            'file_id': file_id,
-            'username': username,
+        upload_urls.append({
             'filename': filename,
-            'file_hash': file_hash,
-            'size': len(content),
-            'content_type': content_type,
-            'uploaded_at': datetime.utcnow().isoformat()
-        })
-        
-        results.append({
-            'filename': filename,
-            'status': 'success',
             'file_id': file_id,
-            'size': len(content)
+            'upload_url': presigned_url,
+            'content_type': content_type
         })
     
     return {
         'statusCode': 200,
         'headers': headers,
-        'body': json.dumps({'results': results})
+        'body': json.dumps({'upload_urls': upload_urls})
+    }
+
+
+def handle_check_duplicate(event, headers):
+    """Check if file hash already exists"""
+    username = verify_token(event)
+    if not username:
+        return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
+    
+    body = json.loads(event.get('body', '{}'))
+    file_hash = body.get('file_hash')
+    
+    if not file_hash:
+        return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Missing file_hash'})}
+    
+    # Check for duplicate
+    response = files_table.query(
+        IndexName='HashIndex',
+        KeyConditionExpression='file_hash = :hash',
+        ExpressionAttributeValues={':hash': file_hash}
+    )
+    
+    if response.get('Items'):
+        existing = response['Items'][0]
+        return {
+            'statusCode': 200,
+            'headers': headers,
+            'body': json.dumps({
+                'duplicate': True,
+                'existing_file': {
+                    'file_id': existing['file_id'],
+                    'filename': existing['filename']
+                }
+            })
+        }
+    
+    return {
+        'statusCode': 200,
+        'headers': headers,
+        'body': json.dumps({'duplicate': False})
+    }
+
+
+def handle_upload_complete(event, headers):
+    """Store metadata after successful S3 upload"""
+    username = verify_token(event)
+    if not username:
+        return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
+    
+    body = json.loads(event.get('body', '{}'))
+    file_id = body.get('file_id')
+    filename = body.get('filename')
+    file_hash = body.get('file_hash')
+    file_size = body.get('size')
+    content_type = body.get('content_type', 'application/octet-stream')
+    
+    if not all([file_id, filename, file_hash, file_size]):
+        return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Missing required fields'})}
+    
+    # Store metadata
+    files_table.put_item(Item={
+        'file_id': file_id,
+        'username': username,
+        'filename': filename,
+        'file_hash': file_hash,
+        'size': int(file_size),
+        'content_type': content_type,
+        'uploaded_at': datetime.utcnow().isoformat()
+    })
+    
+    return {
+        'statusCode': 200,
+        'headers': headers,
+        'body': json.dumps({'status': 'success', 'file_id': file_id})
     }
 
 
@@ -225,11 +273,11 @@ def handle_download(event, headers):
     if not file_item or file_item['username'] != username:
         return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Access denied'})}
     
-    # Generate presigned URL (cheaper than proxying through Lambda)
+    # Generate presigned URL (valid for 1 hour for large downloads)
     url = s3.generate_presigned_url(
         'get_object',
         Params={'Bucket': BUCKET_NAME, 'Key': file_id},
-        ExpiresIn=300  # 5 minutes
+        ExpiresIn=3600  # 1 hour for large files
     )
     
     return {

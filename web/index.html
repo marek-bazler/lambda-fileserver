@@ -131,46 +131,121 @@
             if (selectedFiles.length === 0) return;
 
             const statusDiv = document.getElementById('uploadStatus');
-            statusDiv.innerHTML = '<p>Uploading...</p>';
+            statusDiv.innerHTML = '<p>Processing files...</p>';
             statusDiv.className = '';
 
-            const filesData = await Promise.all(selectedFiles.map(async file => {
-                const content = await fileToBase64(file);
-                return {
-                    filename: file.name,
-                    content: content.split(',')[1],
-                    content_type: file.type || 'application/octet-stream'
-                };
-            }));
+            let successCount = 0;
+            let duplicateCount = 0;
+            let errorCount = 0;
 
-            try {
-                const response = await fetch(`${API_ENDPOINT}/upload`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({ files: filesData })
-                });
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                statusDiv.innerHTML = `<p>Processing ${i + 1}/${selectedFiles.length}: ${file.name}</p>`;
 
-                const data = await response.json();
+                try {
+                    // Calculate file hash for duplicate detection
+                    const fileHash = await calculateFileHash(file);
 
-                if (response.ok) {
-                    const results = data.results;
-                    const success = results.filter(r => r.status === 'success').length;
-                    const duplicates = results.filter(r => r.status === 'duplicate').length;
-                    
-                    statusDiv.innerHTML = `<p class="success">✓ ${success} uploaded, ${duplicates} duplicates skipped</p>`;
-                    selectedFiles = [];
-                    document.getElementById('fileInput').value = '';
-                    document.getElementById('uploadBtn').disabled = true;
-                    loadFiles();
-                } else {
-                    statusDiv.innerHTML = `<p class="error">Upload failed: ${data.error}</p>`;
+                    // Check for duplicate
+                    const dupCheck = await fetch(`${API_ENDPOINT}/check-duplicate`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ file_hash: fileHash })
+                    });
+
+                    const dupData = await dupCheck.json();
+
+                    if (dupData.duplicate) {
+                        duplicateCount++;
+                        statusDiv.innerHTML = `<p>Processing ${i + 1}/${selectedFiles.length}: ${file.name} (duplicate, skipped)</p>`;
+                        continue;
+                    }
+
+                    // Get presigned upload URL
+                    const urlResponse = await fetch(`${API_ENDPOINT}/upload`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            files: [{
+                                filename: file.name,
+                                content_type: file.type || 'video/mp4',
+                                size: file.size
+                            }]
+                        })
+                    });
+
+                    const urlData = await urlResponse.json();
+                    const uploadInfo = urlData.upload_urls[0];
+
+                    // Upload directly to S3 with progress
+                    statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (0%)</p>`;
+
+                    await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        
+                        xhr.upload.addEventListener('progress', (e) => {
+                            if (e.lengthComputable) {
+                                const percent = Math.round((e.loaded / e.total) * 100);
+                                statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%)</p>`;
+                            }
+                        });
+
+                        xhr.addEventListener('load', () => {
+                            if (xhr.status === 200) {
+                                resolve();
+                            } else {
+                                reject(new Error('Upload failed'));
+                            }
+                        });
+
+                        xhr.addEventListener('error', () => reject(new Error('Network error')));
+
+                        xhr.open('PUT', uploadInfo.upload_url);
+                        xhr.setRequestHeader('Content-Type', uploadInfo.content_type);
+                        xhr.send(file);
+                    });
+
+                    // Notify backend of successful upload
+                    await fetch(`${API_ENDPOINT}/upload-complete`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            file_id: uploadInfo.file_id,
+                            filename: file.name,
+                            file_hash: fileHash,
+                            size: file.size,
+                            content_type: uploadInfo.content_type
+                        })
+                    });
+
+                    successCount++;
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    errorCount++;
                 }
-            } catch (error) {
-                statusDiv.innerHTML = `<p class="error">Network error</p>`;
             }
+
+            statusDiv.innerHTML = `<p class="success">✓ ${successCount} uploaded, ${duplicateCount} duplicates skipped${errorCount > 0 ? `, ${errorCount} errors` : ''}</p>`;
+            selectedFiles = [];
+            document.getElementById('fileInput').value = '';
+            document.getElementById('uploadBtn').disabled = true;
+            loadFiles();
+        }
+
+        async function calculateFileHash(file) {
+            const buffer = await file.arrayBuffer();
+            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
         async function loadFiles() {
@@ -221,14 +296,7 @@
             }
         }
 
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        }
+
 
         function formatBytes(bytes) {
             if (bytes === 0) return '0 Bytes';

@@ -18,11 +18,13 @@ Cost-effective serverless file server for occasional archive access.
 
 ## Features
 - ✅ User authentication
-- ✅ File upload (single + batch)
-- ✅ File download
-- ✅ List files by user
-- ✅ Duplicate detection (SHA256 hash)
+- ✅ Direct S3 upload/download (no Lambda proxy)
+- ✅ Large file support (no size limits)
+- ✅ Upload progress tracking
+- ✅ Batch upload with per-file progress
+- ✅ Duplicate detection (SHA256 hash, client-side)
 - ✅ Simple web interface
+- ✅ Optimized for movies and large files
 
 ## Local Testing
 
