@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Server</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .card { background: white; border-radius: 8px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #333; margin-bottom: 24px; }
+        h2 { color: #555; margin-bottom: 16px; font-size: 18px; }
+        input, button { padding: 10px; border-radius: 4px; border: 1px solid #ddd; font-size: 14px; }
+        input { width: 100%; margin-bottom: 12px; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: 500; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .hidden { display: none; }
+        .file-list { list-style: none; }
+        .file-item { padding: 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .file-item:last-child { border-bottom: none; }
+        .file-info { flex: 1; }
+        .file-name { font-weight: 500; color: #333; }
+        .file-meta { font-size: 12px; color: #888; margin-top: 4px; }
+        .btn-small { padding: 6px 12px; font-size: 12px; margin-left: 8px; }
+        .error { color: #dc3545; margin-top: 8px; font-size: 14px; }
+        .success { color: #28a745; margin-top: 8px; font-size: 14px; }
+        .upload-area { border: 2px dashed #ddd; border-radius: 4px; padding: 40px; text-align: center; cursor: pointer; margin-bottom: 16px; }
+        .upload-area:hover { border-color: #007bff; background: #f8f9fa; }
+        .logout-btn { float: right; background: #6c757d; }
+        .logout-btn:hover { background: #545b62; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Section -->
+        <div id="loginSection" class="card">
+            <h1>File Server Login</h1>
+            <input type="text" id="username" placeholder="Username" />
+            <input type="password" id="password" placeholder="Password" />
+            <button onclick="login()">Login</button>
+            <div id="loginError" class="error hidden"></div>
+        </div>
+
+        <!-- Main Section -->
+        <div id="mainSection" class="hidden">
+            <div class="card">
+                <h1>File Server <button class="logout-btn btn-small" onclick="logout()">Logout</button></h1>
+                <p>Welcome, <strong id="currentUser"></strong></p>
+            </div>
+
+            <!-- Upload Section -->
+            <div class="card">
+                <h2>Upload Files</h2>
+                <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                    <p>Click to select files or drag and drop</p>
+                    <p style="font-size: 12px; color: #888; margin-top: 8px;">Multiple files supported</p>
+                </div>
+                <input type="file" id="fileInput" multiple style="display: none;" onchange="handleFiles(this.files)" />
+                <button onclick="uploadFiles()" id="uploadBtn" disabled>Upload Selected Files</button>
+                <div id="uploadStatus" class="hidden"></div>
+            </div>
+
+            <!-- Files List -->
+            <div class="card">
+                <h2>Your Files</h2>
+                <ul id="filesList" class="file-list"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = 'YOUR_API_ENDPOINT_HERE'; // Replace after deployment
+        let token = localStorage.getItem('token');
+        let selectedFiles = [];
+
+        if (token) {
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('mainSection').classList.remove('hidden');
+            document.getElementById('currentUser').textContent = localStorage.getItem('username');
+            loadFiles();
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('loginError');
+
+            try {
+                const response = await fetch(`${API_ENDPOINT}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    token = data.token;
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('username', username);
+                    document.getElementById('loginSection').classList.add('hidden');
+                    document.getElementById('mainSection').classList.remove('hidden');
+                    document.getElementById('currentUser').textContent = username;
+                    loadFiles();
+                } else {
+                    errorDiv.textContent = data.error || 'Login failed';
+                    errorDiv.classList.remove('hidden');
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Network error';
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            location.reload();
+        }
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files);
+            document.getElementById('uploadBtn').disabled = selectedFiles.length === 0;
+            document.getElementById('uploadStatus').innerHTML = `<p>${selectedFiles.length} file(s) selected</p>`;
+            document.getElementById('uploadStatus').classList.remove('hidden');
+        }
+
+        async function uploadFiles() {
+            if (selectedFiles.length === 0) return;
+
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.innerHTML = '<p>Uploading...</p>';
+            statusDiv.className = '';
+
+            const filesData = await Promise.all(selectedFiles.map(async file => {
+                const content = await fileToBase64(file);
+                return {
+                    filename: file.name,
+                    content: content.split(',')[1],
+                    content_type: file.type || 'application/octet-stream'
+                };
+            }));
+
+            try {
+                const response = await fetch(`${API_ENDPOINT}/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ files: filesData })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const results = data.results;
+                    const success = results.filter(r => r.status === 'success').length;
+                    const duplicates = results.filter(r => r.status === 'duplicate').length;
+                    
+                    statusDiv.innerHTML = `<p class="success">✓ ${success} uploaded, ${duplicates} duplicates skipped</p>`;
+                    selectedFiles = [];
+                    document.getElementById('fileInput').value = '';
+                    document.getElementById('uploadBtn').disabled = true;
+                    loadFiles();
+                } else {
+                    statusDiv.innerHTML = `<p class="error">Upload failed: ${data.error}</p>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<p class="error">Network error</p>`;
+            }
+        }
+
+        async function loadFiles() {
+            try {
+                const response = await fetch(`${API_ENDPOINT}/files`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const filesList = document.getElementById('filesList');
+                    if (data.files.length === 0) {
+                        filesList.innerHTML = '<li class="file-item">No files uploaded yet</li>';
+                    } else {
+                        filesList.innerHTML = data.files.map(file => `
+                            <li class="file-item">
+                                <div class="file-info">
+                                    <div class="file-name">${escapeHtml(file.filename)}</div>
+                                    <div class="file-meta">${formatBytes(file.size)} • ${new Date(file.uploaded_at).toLocaleString()}</div>
+                                </div>
+                                <button class="btn-small" onclick="downloadFile('${file.file_id}', '${escapeHtml(file.filename)}')">Download</button>
+                            </li>
+                        `).join('');
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load files', error);
+            }
+        }
+
+        async function downloadFile(fileId, filename) {
+            try {
+                const response = await fetch(`${API_ENDPOINT}/download?file_id=${encodeURIComponent(fileId)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const a = document.createElement('a');
+                    a.href = data.download_url;
+                    a.download = filename;
+                    a.click();
+                }
+            } catch (error) {
+                alert('Download failed');
+            }
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
