@@ -299,6 +299,12 @@ def handle_upload_complete(event, headers):
             )
         except Exception as e:
             return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': f'Failed to complete multipart upload: {str(e)}'})}
+    else:
+        # Verify file exists in S3 for simple uploads
+        try:
+            s3.head_object(Bucket=BUCKET_NAME, Key=file_id)
+        except Exception as e:
+            return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': f'File not found in S3: {str(e)}'})}
     
     # Store metadata
     files_table.put_item(Item={
@@ -338,7 +344,11 @@ def handle_download(event, headers):
     # Generate presigned URL (valid for 1 hour for large downloads)
     url = s3.generate_presigned_url(
         'get_object',
-        Params={'Bucket': BUCKET_NAME, 'Key': file_id},
+        Params={
+            'Bucket': BUCKET_NAME,
+            'Key': file_id,
+            'ResponseContentDisposition': f'attachment; filename="{file_item["filename"]}"'
+        },
         ExpiresIn=3600  # 1 hour for large files
     )
     
