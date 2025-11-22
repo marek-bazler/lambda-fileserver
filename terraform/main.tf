@@ -34,21 +34,15 @@ resource "aws_s3_bucket" "web" {
   bucket = "${var.project_name}-web-${random_id.suffix.hex}"
 }
 
-resource "aws_s3_bucket_website_configuration" "web" {
-  bucket = aws_s3_bucket.web.id
-
-  index_document {
-    suffix = "index.html"
-  }
-}
+# Website configuration not needed with CloudFront
 
 resource "aws_s3_bucket_public_access_block" "web" {
   bucket = aws_s3_bucket.web.id
 
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # Wait for public access block to be updated before applying policy
@@ -57,26 +51,7 @@ resource "time_sleep" "wait_for_public_access_block" {
   create_duration = "10s"
 }
 
-resource "aws_s3_bucket_policy" "web" {
-  bucket = aws_s3_bucket.web.id
-  depends_on = [
-    aws_s3_bucket_public_access_block.web,
-    time_sleep.wait_for_public_access_block
-  ]
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "PublicReadGetObject"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.web.arn}/*"
-      }
-    ]
-  })
-}
+# Removed - replaced by CloudFront policy
 
 # DynamoDB tables
 resource "aws_dynamodb_table" "users" {
@@ -247,17 +222,106 @@ resource "random_id" "suffix" {
   byte_length = 4
 }
 
+# CloudFront Origin Access Control for S3
+resource "aws_cloudfront_origin_access_control" "web" {
+  name                              = "${var.project_name}-web-oac"
+  description                       = "OAC for web bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# CloudFront distribution for web UI
+resource "aws_cloudfront_distribution" "web" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  default_root_object = "index.html"
+  price_class         = "PriceClass_100" # Use only North America and Europe (cheapest)
+
+  origin {
+    domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
+    origin_id                = "S3-${aws_s3_bucket.web.id}"
+    origin_access_control_id = aws_cloudfront_origin_access_control.web.id
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "S3-${aws_s3_bucket.web.id}"
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+    compress               = true
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  tags = {
+    Name = "${var.project_name}-web-distribution"
+  }
+}
+
+# Update S3 bucket policy to allow CloudFront access
+resource "aws_s3_bucket_policy" "web_cloudfront" {
+  bucket = aws_s3_bucket.web.id
+  depends_on = [
+    aws_s3_bucket_public_access_block.web,
+    time_sleep.wait_for_public_access_block
+  ]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowCloudFrontServicePrincipal"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = "s3:GetObject"
+        Resource = "${aws_s3_bucket.web.arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.web.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
 # Outputs
 output "api_endpoint" {
   value = aws_apigatewayv2_api.api.api_endpoint
 }
 
 output "web_url" {
-  value = "http://${aws_s3_bucket_website_configuration.web.website_endpoint}"
+  value = "https://${aws_cloudfront_distribution.web.domain_name}"
 }
 
 output "web_bucket" {
   value = aws_s3_bucket.web.id
+}
+
+output "cloudfront_distribution_id" {
+  value = aws_cloudfront_distribution.web.id
 }
 
 output "files_bucket" {

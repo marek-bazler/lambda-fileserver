@@ -512,6 +512,11 @@
                     });
 
                     const urlData = await urlResponse.json();
+                    
+                    if (!urlResponse.ok || !urlData.upload_urls) {
+                        console.error('Upload URL request failed:', urlData);
+                        throw new Error(urlData.error || 'Failed to get upload URL');
+                    }
                     const uploadInfo = urlData.upload_urls[0];
 
                     // Upload directly to S3 with progress
@@ -632,10 +637,22 @@
         }
 
         async function calculateFileHash(file) {
-            const buffer = await file.arrayBuffer();
-            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            // crypto.subtle only works on HTTPS or localhost
+            if (!window.crypto || !window.crypto.subtle) {
+                console.warn('crypto.subtle not available (HTTP site), using filename-based hash');
+                // Fallback: use filename + size as pseudo-hash
+                return `fallback-${file.name}-${file.size}`;
+            }
+            
+            try {
+                const buffer = await file.arrayBuffer();
+                const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            } catch (error) {
+                console.warn('Hash calculation failed, using fallback:', error);
+                return `fallback-${file.name}-${file.size}`;
+            }
         }
 
         async function loadFiles() {
