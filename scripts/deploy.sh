@@ -20,12 +20,14 @@ echo "Updating web UI with API endpoint..."
 sed -i "s|YOUR_API_ENDPOINT_HERE|$API_ENDPOINT|g" ../web/index.html
 
 echo "Uploading web UI..."
-aws s3 sync ../web/ s3://$(terraform output -raw files_bucket | sed 's/-files-/-web-/')/ --acl public-read
+WEB_BUCKET=$(terraform output -raw web_bucket)
+aws s3 sync ../web/ s3://$WEB_BUCKET/
 
 echo ""
 echo "Deployment complete!"
+WEB_URL=$(terraform output -raw web_url)
 echo "API Endpoint: $API_ENDPOINT"
-echo "Web UI: http://$WEB_BUCKET"
+echo "Web UI: $WEB_URL"
 echo ""
 echo "Next steps:"
 echo "1. Create a user in DynamoDB users table"

@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.9"
+    }
   }
 }
 
@@ -47,8 +51,18 @@ resource "aws_s3_bucket_public_access_block" "web" {
   restrict_public_buckets = false
 }
 
+# Wait for public access block to be updated before applying policy
+resource "time_sleep" "wait_for_public_access_block" {
+  depends_on = [aws_s3_bucket_public_access_block.web]
+  create_duration = "10s"
+}
+
 resource "aws_s3_bucket_policy" "web" {
   bucket = aws_s3_bucket.web.id
+  depends_on = [
+    aws_s3_bucket_public_access_block.web,
+    time_sleep.wait_for_public_access_block
+  ]
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -208,7 +222,7 @@ resource "aws_apigatewayv2_integration" "lambda" {
 }
 
 resource "aws_apigatewayv2_route" "routes" {
-  for_each = toset(["/login", "/files", "/upload", "/upload-complete", "/check-duplicate", "/download"])
+  for_each = toset(["/login", "/files", "/upload", "/upload-complete", "/check-duplicate", "/download", "/delete"])
 
   api_id    = aws_apigatewayv2_api.api.id
   route_key = "ANY ${each.value}"
@@ -239,7 +253,11 @@ output "api_endpoint" {
 }
 
 output "web_url" {
-  value = aws_s3_bucket_website_configuration.web.website_endpoint
+  value = "http://${aws_s3_bucket_website_configuration.web.website_endpoint}"
+}
+
+output "web_bucket" {
+  value = aws_s3_bucket.web.id
 }
 
 output "files_bucket" {

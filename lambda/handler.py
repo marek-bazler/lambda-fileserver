@@ -45,6 +45,8 @@ def lambda_handler(event, context):
             return handle_check_duplicate(event, headers)
         elif path == '/download' and method == 'GET':
             return handle_download(event, headers)
+        elif path == '/delete' and method == 'POST':
+            return handle_delete(event, headers)
         else:
             return {'statusCode': 404, 'headers': headers, 'body': json.dumps({'error': 'Not found'})}
     except Exception as e:
@@ -343,3 +345,45 @@ def handle_download(event, headers):
         'headers': headers,
         'body': json.dumps({'download_url': url, 'filename': file_item['filename']})
     }
+
+
+def handle_delete(event, headers):
+    """Handle file deletion"""
+    username = verify_token(event)
+    if not username:
+        return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
+    
+    body = json.loads(event.get('body', '{}'))
+    file_id = body.get('file_id')
+    
+    if not file_id:
+        return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Missing file_id'})}
+    
+    # Verify file ownership
+    response = files_table.get_item(Key={'file_id': file_id})
+    file_item = response.get('Item')
+    
+    if not file_item:
+        return {'statusCode': 404, 'headers': headers, 'body': json.dumps({'error': 'File not found'})}
+    
+    if file_item['username'] != username:
+        return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Access denied'})}
+    
+    try:
+        # Delete from S3
+        s3.delete_object(Bucket=BUCKET_NAME, Key=file_id)
+        
+        # Delete metadata from DynamoDB
+        files_table.delete_item(Key={'file_id': file_id})
+        
+        return {
+            'statusCode': 200,
+            'headers': headers,
+            'body': json.dumps({'status': 'success', 'message': 'File deleted successfully'})
+        }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': headers,
+            'body': json.dumps({'error': f'Failed to delete file: {str(e)}'})
+        }
