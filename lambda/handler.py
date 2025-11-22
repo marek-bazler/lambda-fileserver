@@ -107,17 +107,13 @@ def verify_token(event):
 
 
 def handle_list_files(event, headers):
-    """List files for authenticated user"""
+    """List all files (shared archive)"""
     username = verify_token(event)
     if not username:
         return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
     
-    # Query files by user
-    response = files_table.query(
-        IndexName='UserIndex',
-        KeyConditionExpression='username = :username',
-        ExpressionAttributeValues={':username': username}
-    )
+    # Scan all files (shared archive - everyone sees everything)
+    response = files_table.scan()
     
     files = []
     for item in response.get('Items', []):
@@ -126,8 +122,12 @@ def handle_list_files(event, headers):
             'filename': item['filename'],
             'size': int(item['size']),
             'uploaded_at': item['uploaded_at'],
+            'uploaded_by': item['username'],  # Show who uploaded it
             'content_type': item.get('content_type', 'application/octet-stream')
         })
+    
+    # Sort by upload date (newest first)
+    files.sort(key=lambda x: x['uploaded_at'], reverse=True)
     
     return {
         'statusCode': 200,
@@ -325,7 +325,7 @@ def handle_upload_complete(event, headers):
 
 
 def handle_download(event, headers):
-    """Handle file download"""
+    """Handle file download (shared archive - anyone can download)"""
     username = verify_token(event)
     if not username:
         return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
@@ -334,12 +334,12 @@ def handle_download(event, headers):
     if not file_id:
         return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Missing file_id'})}
     
-    # Verify file ownership
+    # Get file metadata (no ownership check - shared archive)
     response = files_table.get_item(Key={'file_id': file_id})
     file_item = response.get('Item')
     
-    if not file_item or file_item['username'] != username:
-        return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Access denied'})}
+    if not file_item:
+        return {'statusCode': 404, 'headers': headers, 'body': json.dumps({'error': 'File not found'})}
     
     # Generate presigned URL (valid for 1 hour for large downloads)
     url = s3.generate_presigned_url(
