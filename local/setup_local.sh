@@ -33,6 +33,12 @@ echo "Creating S3 buckets..."
 aws --endpoint-url=$ENDPOINT s3 mb s3://fileserver-files-local 2>/dev/null || echo "Bucket fileserver-files-local already exists"
 aws --endpoint-url=$ENDPOINT s3 mb s3://fileserver-web-local 2>/dev/null || echo "Bucket fileserver-web-local already exists"
 
+# Configure CORS for file uploads from browser
+echo "Configuring CORS..."
+aws --endpoint-url=$ENDPOINT s3api put-bucket-cors \
+    --bucket fileserver-files-local \
+    --cors-configuration file://$(dirname "$0")/cors.json
+
 # Create DynamoDB tables
 echo "Creating DynamoDB tables..."
 aws --endpoint-url=$ENDPOINT dynamodb create-table \
