@@ -32,18 +32,23 @@ Cost-effective serverless file server for occasional archive access.
 Test everything locally before deploying to AWS:
 
 ```bash
-# Install local dependencies
+# 1. Install dependencies (creates virtual environment)
 make local-setup
 
-# Start LocalStack + API server
+# 2. Start LocalStack + API server
 make local-start
 
-# Open browser to http://localhost:8080/index-local.html
+# 3. Open browser to http://localhost:8080/index-local.html
 # Login with: username=test, password=test123
 
 # Stop services
 make local-stop
+
+# Clean everything (including venv)
+make clean
 ```
+
+**Note**: Uses a virtual environment (.venv) to avoid dependency conflicts with your system Python/conda.
 
 ## AWS Deployment
 

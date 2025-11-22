@@ -10,13 +10,22 @@ local-start:
 	@echo ""
 	@echo "Starting local API server..."
 	@echo "Open http://localhost:8080/index-local.html in your browser"
-	cd local && python3 run_local.py
+	@if [ -d .venv ]; then \
+		cd local && ../.venv/bin/python run_local.py; \
+	else \
+		cd local && python3 run_local.py; \
+	fi
 
 local-setup:
+	@echo "Creating virtual environment..."
+	python3 -m venv .venv
 	@echo "Installing local dependencies..."
-	pip install -r local/requirements.txt
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install -r local/requirements.txt
 	@echo "Making scripts executable..."
 	chmod +x local/setup_local.sh local/run_local.py
+	@echo ""
+	@echo "Setup complete! Virtual environment created in .venv/"
 
 local-stop:
 	@echo "Stopping services..."
@@ -25,6 +34,7 @@ local-stop:
 clean:
 	@echo "Cleaning up..."
 	rm -rf localstack-data/
+	rm -rf .venv/
 	docker-compose down -v
 
 test:

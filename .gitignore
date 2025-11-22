@@ -7,3 +7,5 @@ __pycache__/
 .terraform.lock.hcl
 lambda/boto3/
 lambda/botocore/
+.venv/
+localstack-data/
