@@ -2,14 +2,13 @@
 
 local-start:
 	@echo "Starting LocalStack..."
-	docker-compose up -d
-	@echo "Waiting for LocalStack to be ready..."
-	@sleep 5
+	@docker-compose up -d
 	@echo "Setting up local AWS resources..."
-	./local/setup_local.sh
+	@./local/setup_local.sh
 	@echo ""
 	@echo "Starting local API server..."
 	@echo "Open http://localhost:8080/index-local.html in your browser"
+	@echo ""
 	@if [ -d .venv ]; then \
 		cd local && ../.venv/bin/python run_local.py; \
 	else \

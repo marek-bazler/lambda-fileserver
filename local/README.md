@@ -18,11 +18,37 @@ python local/run_local.py
 
 ## Troubleshooting
 
+### Docker Permission Denied
+If you see "permission denied while trying to connect to the docker API":
+
+```bash
+# Option 1: Add your user to docker group (recommended)
+sudo usermod -aG docker $USER
+newgrp docker  # Or logout/login
+
+# Option 2: Use sudo
+sudo docker-compose up -d
+sudo ./local/setup_local.sh
+```
+
 ### Dependency Conflicts
 If you see boto3/botocore version conflicts:
 - The virtual environment (.venv) isolates dependencies
 - Don't use your conda base environment
 - Run `make clean` then `make local-setup` to start fresh
+
+### LocalStack Not Starting
+```bash
+# Check Docker is running
+systemctl status docker
+
+# Check LocalStack logs
+docker-compose logs localstack
+
+# Restart everything
+docker-compose down -v
+docker-compose up -d
+```
 
 ### Port Already in Use
 - LocalStack: 4566
@@ -31,8 +57,9 @@ If you see boto3/botocore version conflicts:
 
 Check with: `lsof -i :5000` or `netstat -an | grep 5000`
 
-### Docker Issues
+### AWS CLI Not Found
 ```bash
-docker-compose down -v  # Stop and remove volumes
-docker-compose up -d    # Start fresh
+# Install AWS CLI
+pip install awscli
+# Or: sudo apt install awscli
 ```

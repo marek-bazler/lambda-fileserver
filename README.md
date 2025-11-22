@@ -48,6 +48,18 @@ make local-stop
 make clean
 ```
 
+**Requirements:**
+- Docker (for LocalStack)
+- Python 3.11+
+- AWS CLI (`pip install awscli`)
+
+**Docker Permission Issues?**
+If you get "permission denied" errors:
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
 **Note**: Uses a virtual environment (.venv) to avoid dependency conflicts with your system Python/conda.
 
 ## AWS Deployment
