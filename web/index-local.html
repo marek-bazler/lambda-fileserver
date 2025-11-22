@@ -195,30 +195,16 @@
                     // Upload directly to S3 with progress
                     statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (0%)</p>`;
 
-                    await new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        
-                        xhr.upload.addEventListener('progress', (e) => {
-                            if (e.lengthComputable) {
-                                const percent = Math.round((e.loaded / e.total) * 100);
-                                statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%)</p>`;
-                            }
+                    let uploadResult;
+                    if (uploadInfo.upload_type === 'multipart') {
+                        uploadResult = await uploadMultipart(file, uploadInfo, (percent) => {
+                            statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%) [Multipart]</p>`;
                         });
-
-                        xhr.addEventListener('load', () => {
-                            if (xhr.status === 200) {
-                                resolve();
-                            } else {
-                                reject(new Error('Upload failed'));
-                            }
+                    } else {
+                        uploadResult = await uploadSimple(file, uploadInfo, (percent) => {
+                            statusDiv.innerHTML = `<p>Uploading ${i + 1}/${selectedFiles.length}: ${file.name} (${percent}%)</p>`;
                         });
-
-                        xhr.addEventListener('error', () => reject(new Error('Network error')));
-
-                        xhr.open('PUT', uploadInfo.upload_url);
-                        xhr.setRequestHeader('Content-Type', uploadInfo.content_type);
-                        xhr.send(file);
-                    });
+                    }
 
                     // Notify backend of successful upload
                     await fetch(`${API_ENDPOINT}/upload-complete`, {
@@ -232,7 +218,9 @@
                             filename: file.name,
                             file_hash: fileHash,
                             size: file.size,
-                            content_type: uploadInfo.content_type
+                            content_type: uploadInfo.content_type,
+                            upload_id: uploadResult.upload_id,
+                            parts: uploadResult.parts
                         })
                     });
 
@@ -248,6 +236,69 @@
             document.getElementById('fileInput').value = '';
             document.getElementById('uploadBtn').disabled = true;
             loadFiles();
+        }
+
+        async function uploadSimple(file, uploadInfo, onProgress) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        onProgress(percent);
+                    }
+                });
+
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        resolve({});
+                    } else {
+                        reject(new Error('Upload failed'));
+                    }
+                });
+
+                xhr.addEventListener('error', () => reject(new Error('Network error')));
+
+                xhr.open('PUT', uploadInfo.upload_url);
+                xhr.setRequestHeader('Content-Type', uploadInfo.content_type);
+                xhr.send(file);
+            });
+        }
+
+        async function uploadMultipart(file, uploadInfo, onProgress) {
+            const partSize = uploadInfo.part_size;
+            const parts = [];
+            let uploadedBytes = 0;
+
+            for (let i = 0; i < uploadInfo.part_urls.length; i++) {
+                const start = i * partSize;
+                const end = Math.min(start + partSize, file.size);
+                const chunk = file.slice(start, end);
+
+                const response = await fetch(uploadInfo.part_urls[i], {
+                    method: 'PUT',
+                    body: chunk
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Part ${i + 1} upload failed`);
+                }
+
+                const etag = response.headers.get('ETag');
+                parts.push({
+                    PartNumber: i + 1,
+                    ETag: etag
+                });
+
+                uploadedBytes += chunk.size;
+                const percent = Math.round((uploadedBytes / file.size) * 100);
+                onProgress(percent);
+            }
+
+            return {
+                upload_id: uploadInfo.upload_id,
+                parts: parts
+            };
         }
 
         async function calculateFileHash(file) {

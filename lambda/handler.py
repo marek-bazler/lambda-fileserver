@@ -133,7 +133,7 @@ def handle_list_files(event, headers):
 
 
 def handle_upload(event, headers):
-    """Generate presigned URLs for direct S3 upload"""
+    """Generate presigned URLs for direct S3 upload (simple or multipart)"""
     username = verify_token(event)
     if not username:
         return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Unauthorized'})}
@@ -143,6 +143,9 @@ def handle_upload(event, headers):
     
     if not files:
         return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'No files provided'})}
+    
+    # Multipart threshold: 100MB
+    MULTIPART_THRESHOLD = 100 * 1024 * 1024
     
     upload_urls = []
     
@@ -157,23 +160,64 @@ def handle_upload(event, headers):
         # Generate unique file ID
         file_id = f"{username}/{datetime.utcnow().isoformat()}_{filename}"
         
-        # Generate presigned URL for upload (valid for 1 hour)
-        presigned_url = s3.generate_presigned_url(
-            'put_object',
-            Params={
-                'Bucket': BUCKET_NAME,
-                'Key': file_id,
-                'ContentType': content_type
-            },
-            ExpiresIn=3600
-        )
-        
-        upload_urls.append({
-            'filename': filename,
-            'file_id': file_id,
-            'upload_url': presigned_url,
-            'content_type': content_type
-        })
+        # Use multipart upload for large files
+        if file_size > MULTIPART_THRESHOLD:
+            # Initiate multipart upload
+            multipart = s3.create_multipart_upload(
+                Bucket=BUCKET_NAME,
+                Key=file_id,
+                ContentType=content_type
+            )
+            
+            upload_id = multipart['UploadId']
+            
+            # Calculate part size (10MB chunks)
+            part_size = 10 * 1024 * 1024
+            num_parts = (file_size + part_size - 1) // part_size
+            
+            # Generate presigned URLs for each part
+            part_urls = []
+            for part_num in range(1, num_parts + 1):
+                part_url = s3.generate_presigned_url(
+                    'upload_part',
+                    Params={
+                        'Bucket': BUCKET_NAME,
+                        'Key': file_id,
+                        'UploadId': upload_id,
+                        'PartNumber': part_num
+                    },
+                    ExpiresIn=3600
+                )
+                part_urls.append(part_url)
+            
+            upload_urls.append({
+                'filename': filename,
+                'file_id': file_id,
+                'upload_type': 'multipart',
+                'upload_id': upload_id,
+                'part_size': part_size,
+                'part_urls': part_urls,
+                'content_type': content_type
+            })
+        else:
+            # Simple upload for smaller files
+            presigned_url = s3.generate_presigned_url(
+                'put_object',
+                Params={
+                    'Bucket': BUCKET_NAME,
+                    'Key': file_id,
+                    'ContentType': content_type
+                },
+                ExpiresIn=3600
+            )
+            
+            upload_urls.append({
+                'filename': filename,
+                'file_id': file_id,
+                'upload_type': 'simple',
+                'upload_url': presigned_url,
+                'content_type': content_type
+            })
     
     return {
         'statusCode': 200,
@@ -234,9 +278,23 @@ def handle_upload_complete(event, headers):
     file_hash = body.get('file_hash')
     file_size = body.get('size')
     content_type = body.get('content_type', 'application/octet-stream')
+    upload_id = body.get('upload_id')
+    parts = body.get('parts')
     
     if not all([file_id, filename, file_hash, file_size]):
         return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Missing required fields'})}
+    
+    # Complete multipart upload if applicable
+    if upload_id and parts:
+        try:
+            s3.complete_multipart_upload(
+                Bucket=BUCKET_NAME,
+                Key=file_id,
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
+            )
+        except Exception as e:
+            return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': f'Failed to complete multipart upload: {str(e)}'})}
     
     # Store metadata
     files_table.put_item(Item={

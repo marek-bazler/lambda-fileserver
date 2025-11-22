@@ -36,8 +36,9 @@
 
 ### Reliability
 - **No timeouts**: Lambda only handles metadata
-- **Resumable**: Can implement multipart upload for huge files
+- **Multipart upload**: Automatic for files >100MB (10MB chunks)
 - **Better error handling**: Separate hash check, upload, metadata steps
+- **Parallel chunk uploads**: Faster for large files
 
 ## Cost Comparison (1GB movie file)
 
@@ -67,3 +68,22 @@
 - Presigned URLs are time-limited
 - File ownership verified before generating URLs
 - Each user can only access their own files
+
+## Multipart Upload (Files >100MB)
+
+### How It Works
+1. Lambda initiates multipart upload in S3
+2. File is split into 10MB chunks in browser
+3. Each chunk uploaded separately with progress tracking
+4. Lambda completes multipart upload after all chunks succeed
+
+### Benefits
+- **Better reliability**: Failed chunks can be retried
+- **Progress tracking**: Accurate progress for huge files
+- **No memory issues**: Browser only loads 10MB at a time
+- **Faster**: Chunks can be uploaded in parallel (future enhancement)
+
+### Thresholds
+- Files <100MB: Simple PUT upload
+- Files ≥100MB: Multipart upload (10MB chunks)
+- Maximum file size: 5TB (S3 limit)

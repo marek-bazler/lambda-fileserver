@@ -19,7 +19,8 @@ Cost-effective serverless file server for occasional archive access.
 ## Features
 - ✅ User authentication
 - ✅ Direct S3 upload/download (no Lambda proxy)
-- ✅ Large file support (no size limits)
+- ✅ Multipart upload for files >100MB (10MB chunks)
+- ✅ Large file support (up to 5TB)
 - ✅ Upload progress tracking
 - ✅ Batch upload with per-file progress
 - ✅ Duplicate detection (SHA256 hash, client-side)
