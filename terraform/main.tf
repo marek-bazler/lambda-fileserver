@@ -29,6 +29,19 @@ resource "aws_s3_bucket_public_access_block" "files" {
   restrict_public_buckets = true
 }
 
+# CORS configuration for file uploads from browser
+resource "aws_s3_bucket_cors_configuration" "files" {
+  bucket = aws_s3_bucket.files.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
+    allowed_origins = ["*"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
 # S3 bucket for web UI
 resource "aws_s3_bucket" "web" {
   bucket = "${var.project_name}-web-${random_id.suffix.hex}"
@@ -109,9 +122,7 @@ resource "aws_lambda_function" "api" {
   memory_size     = 256
 
   environment {
-  pload error: TypeError: can't access property 0, urlData.upload_urls is undefined
-    uploadFiles https://d3abswt2o99dbd.cloudfront.net/:511
-    onclick https://d3abswt2o99dbd.cloudfront.net/:1ables = {
+    variables = {
       BUCKET_NAME  = aws_s3_bucket.files.id
       USERS_TABLE  = aws_dynamodb_table.users.name
       FILES_TABLE  = aws_dynamodb_table.files.name

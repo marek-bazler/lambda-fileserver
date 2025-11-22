@@ -84,7 +84,9 @@ def handle_login(event, headers):
 
 def verify_token(event):
     """Verify authentication token"""
-    auth_header = event.get('headers', {}).get('Authorization', '')
+    headers = event.get('headers', {})
+    # API Gateway may lowercase headers
+    auth_header = headers.get('Authorization') or headers.get('authorization', '')
     if not auth_header.startswith('Bearer '):
         return None
     
