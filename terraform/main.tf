@@ -109,7 +109,9 @@ resource "aws_lambda_function" "api" {
   memory_size     = 256
 
   environment {
-    variables = {
+  pload error: TypeError: can't access property 0, urlData.upload_urls is undefined
+    uploadFiles https://d3abswt2o99dbd.cloudfront.net/:511
+    onclick https://d3abswt2o99dbd.cloudfront.net/:1ables = {
       BUCKET_NAME  = aws_s3_bucket.files.id
       USERS_TABLE  = aws_dynamodb_table.users.name
       FILES_TABLE  = aws_dynamodb_table.files.name
@@ -258,8 +260,8 @@ resource "aws_cloudfront_distribution" "web" {
 
     viewer_protocol_policy = "redirect-to-https"
     min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
+    default_ttl            = 300  # 5 minutes (was 1 hour)
+    max_ttl                = 3600 # 1 hour (was 24 hours)
     compress               = true
   }
 

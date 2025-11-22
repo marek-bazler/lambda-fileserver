@@ -240,6 +240,9 @@
             padding: 8px 16px;
             font-size: 14px;
             width: auto;
+            position: relative;
+            z-index: 10;
+            cursor: pointer;
         }
         
         .logout-btn:hover { 
@@ -386,9 +389,22 @@
         }
 
         function logout() {
+            console.log('Logout clicked');
             localStorage.removeItem('token');
             localStorage.removeItem('username');
-            location.reload();
+            token = null;
+            
+            console.log('Token cleared, showing login screen');
+            
+            // Show login, hide main
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('mainSection').classList.add('hidden');
+            
+            // Clear form
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            
+            console.log('Logout complete');
         }
 
         function handleFiles(files) {
