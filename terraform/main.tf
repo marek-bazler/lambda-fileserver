@@ -250,6 +250,19 @@ resource "random_id" "suffix" {
   byte_length = 4
 }
 
+# Route53 record pointing to CloudFront
+resource "aws_route53_record" "web" {
+  zone_id = var.hosted_zone_id
+  name    = var.domain_name
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.web.domain_name
+    zone_id                = aws_cloudfront_distribution.web.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
 # CloudFront Origin Access Control for S3
 resource "aws_cloudfront_origin_access_control" "web" {
   name                              = "${var.project_name}-web-oac"
@@ -259,12 +272,51 @@ resource "aws_cloudfront_origin_access_control" "web" {
   signing_protocol                  = "sigv4"
 }
 
+# ACM Certificate for custom domain (must be in us-east-1 for CloudFront)
+resource "aws_acm_certificate" "web" {
+  domain_name       = var.domain_name
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = {
+    Name = "${var.project_name}-cert"
+  }
+}
+
+# DNS validation record
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.web.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = var.hosted_zone_id
+}
+
+# Wait for certificate validation
+resource "aws_acm_certificate_validation" "web" {
+  certificate_arn         = aws_acm_certificate.web.arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
+}
+
 # CloudFront distribution for web UI
 resource "aws_cloudfront_distribution" "web" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
   price_class         = "PriceClass_100" # Use only North America and Europe (cheapest)
+  aliases             = [var.domain_name]
 
   origin {
     domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
@@ -298,8 +350,12 @@ resource "aws_cloudfront_distribution" "web" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    acm_certificate_arn      = aws_acm_certificate.web.arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
   }
+
+  depends_on = [aws_acm_certificate_validation.web]
 
   tags = {
     Name = "${var.project_name}-web-distribution"
@@ -350,6 +406,10 @@ output "web_bucket" {
 
 output "cloudfront_distribution_id" {
   value = aws_cloudfront_distribution.web.id
+}
+
+output "custom_domain" {
+  value = "https://${var.domain_name}"
 }
 
 output "files_bucket" {
