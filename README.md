@@ -1,6 +1,8 @@
-# AWS Lambda File Server
+# 🎬 Lambda File Server - Shared Movie Archive
 
-Cost-effective serverless file server for occasional archive access.
+Cost-effective serverless file server for collaborative movie sharing.
+
+**Live Demo:** https://fileshare.bazlers.org
 
 ## Architecture
 - **Lambda Functions**: Handle API requests (auth, upload, download, list)
