@@ -342,12 +342,16 @@ def handle_download(event, headers):
         return {'statusCode': 404, 'headers': headers, 'body': json.dumps({'error': 'File not found'})}
     
     # Generate presigned URL (valid for 1 hour for large downloads)
+    # URL-encode filename to handle non-ASCII characters
+    import urllib.parse
+    encoded_filename = urllib.parse.quote(file_item["filename"])
+    
     url = s3.generate_presigned_url(
         'get_object',
         Params={
             'Bucket': BUCKET_NAME,
             'Key': file_id,
-            'ResponseContentDisposition': f'attachment; filename="{file_item["filename"]}"'
+            'ResponseContentDisposition': f'attachment; filename*=UTF-8\'\'{encoded_filename}'
         },
         ExpiresIn=3600  # 1 hour for large files
     )
